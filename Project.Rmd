@@ -1,0 +1,508 @@
+---
+title: "443 Project"
+output: pdf_document
+date: "2022-11-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Cleaning and Preprocessing
+
+```{r}
+df <- read.csv("Data_Group11.csv")
+```
+
+We first convert the data in to a more usable long format.
+```{r}
+# convert month and day to MM-DD format
+singledig <- which(df$X.1 < 10)
+df$day <- as.character(df$X.1)
+df$day[singledig] <- paste0("0", df$day[singledig])
+
+df$month <- rep(c("01","02","03","04", "05","06","07","08","09","10","11","12"), times=c(31,29,31,30,31,30,31,31,30,31,30,31))
+
+df$MMDD <- paste0(df$month, "-", df$day)
+
+# drop unnecessary columns
+to_drop <- c("X", "X.1", "X.2", "X1981.2010.mean", "X1981.2010.median", "month", "day")
+df <- subset(df, select=!(names(df) %in% to_drop))
+
+# melt years to be one column
+library(tidyr)
+df <- pivot_longer(data=df, cols=!MMDD, names_to="year", values_to="extent")
+
+# format year and creating a column with YY-MM-DD format
+library(stringr)
+df$year = str_replace(df$year, "X", "")
+df$YYMMDD <- paste0(df$year, "-", df$MMDD)
+
+# tell R YYMMDD is a date
+df$YYMMDD = as.Date(df$YYMMDD) # also conveniently rids of non leap year Feb 29's
+
+# drop unnecessary columns
+to_drop <- c("MMDD", "year")
+df <- subset(df, select=!(names(df) %in% to_drop))
+
+# order data by date
+df <- df[order(df$YYMMDD),]
+
+head(df)
+``` 
+We then deal with NA values.
+
+```{r}
+# drop initial and ending NAs because we don't have data collected for these dates
+library(zoo)
+df <- na.trim(df)
+```
+
+There seems to be a change point at 1988-01-13 where a new method of measurement may of been put in to place.
+Before this date, there is a long stretch of NA values, and all measurements previously were recorded every second day.
+
+```{r}
+# There is a period between 1987-12-03 and 1988-01-12 with a stretch of NAs. The following allows this period to be examined.
+df_subset <- subset(df, YYMMDD>as.Date("1987-12-01") & YYMMDD<as.Date("1988-01-15"))
+print(df_subset)
+```
+
+To deal with this long stretch of NAs and the NA values caused by measurement every second day, we propose two options.
+Either, we impute the missing data using cubic splines, or drop all observations before the possible changepoint.
+
+```{r}
+# impute missing values using cubic splines as one option
+df_imputed <- df
+df_imputed$extent <- na.spline(df_imputed$extent)
+
+# drop all data before 1988-01-13 as another option
+df <- subset(df, YYMMDD>=as.Date("1988-01-13"))
+```
+
+We are interested in overall trend, not day to day fluctuations, so we consider aggregating values by month.
+
+```{r}
+library(dplyr)
+library(lubridate)
+df_aggregated <- df %>% 
+  group_by(year=year(YYMMDD), month=month(YYMMDD)) %>%
+  mutate(avg_extent = mean(extent)) %>%
+  distinct(year, month, .keep_all=TRUE) %>%
+  subset(select=c(year, month, avg_extent))
+```
+
+Now that our data is cleaned and processed, we may proceed with analysis.
+
+\newpage
+
+# Unaggregated Data
+
+We first analyze the unaggregated data.
+
+```{r}
+# make a TS object
+ExtentTS <- ts(df$extent, frequency=365, start=year(df$YYMMDD[1]))
+```
+
+```{r}
+plot(ExtentTS)
+acf(ExtentTS, lag.max=365)
+```
+
+## Variance
+
+From the plot, we see a clear seasonal pattern, and perhaps a decreasing linear trend.
+
+It is unclear whether variance is constant. We test this using the Fligner-Keileen test.
+
+```{r}
+# do Fligner test for constant variance.
+segments = factor(c(rep(1:4, each=2542), rep(5, times=2543)))
+fligner.test(ExtentTS, segments)
+
+segments = factor(c(rep(1:9, each=1271), rep(10, times=1272)))
+fligner.test(ExtentTS, segments)
+
+segments = factor(c(rep(1:49, each=254), rep(50, times=265)))
+fligner.test(ExtentTS, segments)
+
+segments = factor(c(rep(1:99, each=127), rep(100, times=138)))
+fligner.test(ExtentTS, segments)
+
+segments = factor(c(rep(1:34, each=364), rep(35, times=335))) # corresponds more closely to each "wave"
+fligner.test(ExtentTS, segments)
+```
+
+All give really low p-value so may conclude that variance is not constant. However, this could be due to the amount of data we have.
+
+## Regression
+
+Try to remove non-stationarity using Regression (Multiple Linear, Ridge, Lasso, Elastic Net).
+
+### Multiple Linear Regression
+
+```{r}
+mlr <- lm(ExtentTS~time(ExtentTS)+factor(cycle(ExtentTS)))
+summary(mlr) #verrrryyyyy long output and complicated model.
+```
+
+```{r}
+plot(ExtentTS)
+points(time(ExtentTS),predict.lm(mlr),type='l',col='red')
+```
+
+We see from the regression, that including daily data leads to a very complicated regression model, and acf plot which has to go way beyond recommended lag to observe an entire period.
+For this reason, and because we care mostly about overall trend and not daily fluctuation, we proceed with the aggregated data.
+
+\newpage
+
+# Aggregated Data
+
+We proceed with analyzing the monthly aggregated data.
+
+```{r}
+# make a ts object
+Avg_ExtentTS <- ts(df_aggregated$avg_extent, frequency=12, start=year(df$YYMMDD[1]))
+plot(Avg_ExtentTS)
+```
+
+```{r}
+plot(decompose(Avg_ExtentTS)$trend)
+plot(decompose(Avg_ExtentTS)$season)
+plot(decompose(Avg_ExtentTS)$random)
+```
+From the decomposition, we see there is a significant seasonal pattern, and likely significant trend.
+
+## Variance
+
+From the plot, we see a clear seasonal pattern, and perhaps a decreasing linear trend.
+
+It is unclear whether variance is constant. We test this using the Fligner-Killeen test.
+
+```{r}
+# do Fligner test for constant variance.
+segments = factor(c(rep(1:4, each=84), rep(5, times=82)))
+fligner.test(Avg_ExtentTS, segments)
+
+segments = factor(c(rep(1:9, each=42), rep(10, times=40)))
+fligner.test(Avg_ExtentTS, segments)
+
+segments = factor(c(rep(1:19, each=21), rep(20, times=19)))
+fligner.test(Avg_ExtentTS, segments)
+
+segments = factor(c(rep(1:34, each=12), rep(35, times=10))) # corresponds to number of years of data
+fligner.test(Avg_ExtentTS, segments)
+```
+
+All give high p-value so may conclude that variance is relatively constant. This is against expectation, but perhaps this is because the change in variance is not significant over such a small time frame.
+
+```{r}
+# define mse function for future use
+mse <- function(y, yhat) {
+  return(mean((as.vector(y)-as.vector(yhat))^2))
+}
+```
+
+## Regression
+
+First, split the data, in to train and test set.
+
+```{r}
+Avg_ExtentTS_Train <- ts(head(Avg_ExtentTS, -24), frequency=12)
+time_train <- head(time(Avg_ExtentTS), -24)
+Avg_ExtentTS_Test <- ts(tail(Avg_ExtentTS, 24), frequency=12)
+time_test <- tail(time(Avg_ExtentTS), 24)
+```
+
+Try to remove non-stationarity using Regression (Multiple Linear, Ridge, Lasso, Elastic Net).
+
+### Multiple Linear Regression
+
+```{r}
+tim <- time_train
+season <- factor(cycle(Avg_ExtentTS_Train))
+
+# degree 1 polynomial of time
+mlr_train <- lm(Avg_ExtentTS_Train~tim+season)
+
+new <- data.frame(tim=time_test, season=factor(cycle(Avg_ExtentTS_Test)))
+mse(Avg_ExtentTS_Test, predict.lm(mlr_train, new))
+
+# degree 2 polynomial of time
+mlr_train_2 <- lm(Avg_ExtentTS_Train~poly(tim,2)+season)
+
+mse(Avg_ExtentTS_Test, predict.lm(mlr_train_2, new))
+
+# degree 3 polynomial of time
+mlr_train_3 <- lm(Avg_ExtentTS_Train~poly(tim,3)+season)
+
+mse(Avg_ExtentTS_Test, predict.lm(mlr_train_3, new))
+
+#TODO residual diagnostics if proceed with this model
+```
+
+The cubic model strictly performs best on the hold out set. However, the linear model may be better for its simplicity given that it has a similar MSE.
+
+```{r}
+tim <- as.vector(time(Avg_ExtentTS))
+season <- factor(cycle(Avg_ExtentTS))
+mlr <- lm(Avg_ExtentTS~tim+season)
+
+plot(Avg_ExtentTS)
+points(time(Avg_ExtentTS), predict.lm(mlr), type='l', col='red')
+plot(mlr$residuals, type="l")
+acf(mlr$residuals)
+```
+
+### Ridge
+
+```{r}
+library(glmnet)
+
+tim <- time_train
+season <- factor(cycle(Avg_ExtentTS_Train))
+X <- model.matrix(as.vector(Avg_ExtentTS_Train)~tim+season)
+X_2 <- model.matrix(as.vector(Avg_ExtentTS_Train)~poly(tim,2)+season)
+X_3 <- model.matrix(as.vector(Avg_ExtentTS_Train)~poly(tim,3)+season)
+ridge_train <- glmnet(X, as.vector(Avg_ExtentTS_Train), alpha=0)
+ridge_train_2 <- glmnet(X_2, as.vector(Avg_ExtentTS_Train), alpha=0)
+ridge_train_3 <- glmnet(X_3, as.vector(Avg_ExtentTS_Train), alpha=0)
+
+tim <- time_test
+season <- factor(cycle(Avg_ExtentTS_Test))
+X <- model.matrix(as.vector(Avg_ExtentTS_Test)~tim+season)
+X_2 <- model.matrix(as.vector(Avg_ExtentTS_Test)~poly(tim,2)+season)
+X_3 <- model.matrix(as.vector(Avg_ExtentTS_Test)~poly(tim,3)+season)
+ridge_predictions <- predict(ridge_train, X)
+ridge_predictions_2 <- predict(ridge_train_2, X_2)
+ridge_predictions_3 <- predict(ridge_train_2, X_2)
+
+mses <- c()
+mses_2 <- c()
+mses_3 <- c()
+for(i in 1:100) {
+  mses <- c(mses, mse(Avg_ExtentTS_Test, ridge_predictions[,i]))
+  mses_2 <- c(mses_2, mse(Avg_ExtentTS_Test, ridge_predictions_2[,i]))
+  mses_3 <- c(mses_3, mse(Avg_ExtentTS_Test, ridge_predictions_3[,i]))
+}
+
+ridge_train$lambda[which.min(mses)]
+mses[which.min(mses)]
+ridge_train_2$lambda[which.min(mses_2)]
+mses_2[which.min(mses_2)]
+ridge_train_3$lambda[which.min(mses_3)]
+mses_3[which.min(mses_3)]
+```
+
+We see that the degree 1 polynomial gives the lowest MSE.
+
+```{r}
+#degree 1 polynomial
+tim <- as.vector(time(Avg_ExtentTS))
+season <- factor(cycle(Avg_ExtentTS))
+X <- model.matrix(as.vector(Avg_ExtentTS)~tim+season)
+ridge <- glmnet(X, as.vector(Avg_ExtentTS), alpha=0, lambda=2.9671762)
+ridge_fitted <- predict(ridge, X, type="response")
+ridge_residuals <- Avg_ExtentTS - ridge_fitted
+plot(ridge_residuals, type="l")
+plot(Avg_ExtentTS)
+points(time(Avg_ExtentTS), ridge_fitted, type='l', col='red')
+acf(ridge_residuals)
+```
+```{r}
+#degree 2 polynomial
+tim <- as.vector(time(Avg_ExtentTS))
+season <- factor(cycle(Avg_ExtentTS))
+X <- model.matrix(as.vector(Avg_ExtentTS)~poly(tim,2)+season)
+ridge_2 <- glmnet(X, as.vector(Avg_ExtentTS), alpha=0, lambda=5.690778)
+ridge_2_fitted <- predict(ridge_2, X, type="response")
+ridge_2_residuals <- Avg_ExtentTS - ridge_2_fitted
+plot(ridge_2_residuals, type="l")
+plot(Avg_ExtentTS)
+points(time(Avg_ExtentTS), ridge_2_fitted, type='l', col='red')
+acf(ridge_2_residuals)
+```
+### Lasso
+
+```{r}
+library(glmnet)
+
+tim <- time_train
+season <- factor(cycle(Avg_ExtentTS_Train))
+X <- model.matrix(as.vector(Avg_ExtentTS_Train)~tim+season)
+X_2 <- model.matrix(as.vector(Avg_ExtentTS_Train)~poly(tim,2)+season)
+X_3 <- model.matrix(as.vector(Avg_ExtentTS_Train)~poly(tim,3)+season)
+lasso_train <- glmnet(X, as.vector(Avg_ExtentTS_Train), alpha=1)
+lasso_train_2 <- glmnet(X_2, as.vector(Avg_ExtentTS_Train), alpha=1)
+lasso_train_3 <- glmnet(X_3, as.vector(Avg_ExtentTS_Train), alpha=1)
+
+tim <- time_test
+season <- factor(cycle(Avg_ExtentTS_Test))
+X <- model.matrix(as.vector(Avg_ExtentTS_Test)~tim+season)
+X_2 <- model.matrix(as.vector(Avg_ExtentTS_Test)~poly(tim,2)+season)
+X_3 <- model.matrix(as.vector(Avg_ExtentTS_Test)~poly(tim,3)+season)
+lasso_predictions <- predict(lasso_train, X)
+lasso_predictions_2 <- predict(lasso_train_2, X_2)
+lasso_predictions_3 <- predict(lasso_train_2, X_2)
+
+mses <- c()
+mses_2 <- c()
+mses_3 <- c()
+for(i in 1:67) {
+  mses <- c(mses, mse(Avg_ExtentTS_Test, lasso_predictions[,i]))
+  mses_2 <- c(mses_2, mse(Avg_ExtentTS_Test, lasso_predictions_2[,i]))
+  mses_3 <- c(mses_3, mse(Avg_ExtentTS_Test, lasso_predictions_3[,i]))
+}
+
+lasso_train$lambda[which.min(mses)]
+mses[which.min(mses)]
+lasso_train_2$lambda[which.min(mses_2)]
+mses_2[which.min(mses_2)]
+lasso_train_3$lambda[which.min(mses_3)]
+mses_3[which.min(mses_3)]
+```
+
+We see that the degree 1 polynomial gives the lowest MSE.
+
+```{r}
+# degree 1 polynomial of time
+tim <- as.vector(time(Avg_ExtentTS))
+season <- factor(cycle(Avg_ExtentTS))
+X <- model.matrix(as.vector(Avg_ExtentTS)~tim+season)
+lasso <- glmnet(X, as.vector(Avg_ExtentTS), alpha=1, lambda=0.3411532)
+lasso_fitted <- predict(lasso, X, type="response")
+lasso_residuals <- Avg_ExtentTS - lasso_fitted
+plot(lasso_residuals, type="l")
+plot(Avg_ExtentTS)
+points(time(Avg_ExtentTS), lasso_fitted, type='l', col='red')
+acf(lasso_residuals)
+```
+
+```{r}
+# degree 2 polynomial of time
+tim <- as.vector(time(Avg_ExtentTS))
+season <- factor(cycle(Avg_ExtentTS))
+X <- model.matrix(as.vector(Avg_ExtentTS)~poly(tim,2)+season)
+lasso <- glmnet(X, as.vector(Avg_ExtentTS), alpha=1, lambda=0.3411532)
+lasso_fitted <- predict(lasso, X, type="response")
+lasso_residuals <- Avg_ExtentTS - lasso_fitted
+plot(lasso_residuals, type="l")
+plot(Avg_ExtentTS)
+points(time(Avg_ExtentTS), lasso_fitted, type='l', col='red')
+acf(lasso_residuals)
+```
+
+### Elastic Net 
+
+```{r}
+#TODO
+```
+
+## Holt-Winters
+
+Try to remove non-stationarity using exponential smoothing, double exponential smoothing, additive HW, and multiplicative HW.
+
+### Exponential Smoothing
+
+```{r}
+es <- HoltWinters(Avg_ExtentTS_Train, gamma = FALSE , beta = FALSE)
+predict_es = predict(es, n.ahead=24)
+mse(Avg_ExtentTS_Test, predict_es)
+```
+
+### Double Exponential Smoothing
+
+```{r}
+des <- HoltWinters(Avg_ExtentTS_Train, gamma = FALSE)
+predict_des = predict(des, n.ahead=24)
+mse(Avg_ExtentTS_Test, predict_des)
+```
+
+### Additive Holt-Winters
+
+```{r}
+additive <- HoltWinters(Avg_ExtentTS_Train, seasonal = "additive")
+predict_additive = predict(additive, n.ahead=24)
+mse(Avg_ExtentTS_Test, predict_additive)
+```
+
+### Multiplicative Holt-Winters
+
+```{r}
+multiplicative <- HoltWinters(Avg_ExtentTS_Train, seasonal = "multiplicative")
+predict_multiplicative = predict(multiplicative, n.ahead=24)
+mse(Avg_ExtentTS_Test, predict_additive)
+```
+
+Best of HW models seems to be additive model. We fit this model to the entire data.
+
+```{r}
+hw_additive <- HoltWinters(Avg_ExtentTS, seasonal = "additive")
+residuals_HW <- as.vector(Avg_ExtentTS[which(time(Avg_ExtentTS)>=1989)]) - hw_additive$fitted[,1]
+plot(residuals_HW, type="l")
+acf(residuals_HW, lag.max=36)
+plot(Avg_ExtentTS)
+points(time(Avg_ExtentTS)[which(time(Avg_ExtentTS)>=1989)], hw_additive$fitted[,1], type='l', col='red')
+```
+
+## Differencing
+
+Try differencing to remove non-stationarity.
+
+```{r}
+acf(Avg_ExtentTS, lag.max=36)
+plot(Avg_ExtentTS)
+```
+
+```{r}
+#differencing in lag of season
+diff12.Extent=diff(Avg_ExtentTS, lag=12)
+acf(diff12.Extent, lag.max=36)
+plot(diff12.Extent)
+```
+
+```{r}
+#regular differencing
+diff.Extent=diff(Avg_ExtentTS)
+acf(diff.Extent, lag.max=36)
+plot(diff.Extent)
+```
+
+```{r}
+#seasonal+regular differencing
+diff12.diff.Extent=diff(diff12.Extent)
+acf(diff12.diff.Extent, lag.max=36)
+plot(diff12.diff.Extent)
+```
+
+It seems that regression performs poorly in terms of removing non-stationarity compared to HW and Differencing. HW and differencing seem to perform similarly. For simplicity, we proceed with differencing.
+
+```{r}
+acf(diff12.diff.Extent, lag.max=72)
+pacf(diff12.diff.Extent, lag.max=72)
+```
+
+## Smoothing, followed by differencing
+
+Try smoothing before differencing to see effect on acf
+
+```{r}
+smoothing <- HoltWinters(Avg_ExtentTS, season="additive")
+smoothed <- smoothing$fitted[,1]
+diff12.Extent_smooth=diff(smoothed, lag=12)
+acf(diff12.Extent_smooth, lag.max=36)
+plot(diff12.Extent_smooth)
+diff12.diff.Extent_smooth=diff(diff12.Extent_smooth)
+acf(diff12.diff.Extent_smooth, lag.max=36)
+plot(diff12.diff.Extent_smooth)
+```
+```{r}
+acf(diff12.diff.Extent_smooth, lag.max=36)
+pacf(diff12.diff.Extent_smooth, lag.max=36)
+```
+
+
+
+
+
+
