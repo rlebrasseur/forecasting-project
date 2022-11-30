@@ -203,29 +203,27 @@ mse <- function(y, yhat) {
 }
 ```
 
-## Regression
-
 First, split the data, in to train and test set.
 
 ```{r}
-Avg_ExtentTS_Train <- ts(head(Avg_ExtentTS, -24), frequency=12)
-time_train <- head(time(Avg_ExtentTS), -24)
-Avg_ExtentTS_Test <- ts(tail(Avg_ExtentTS, 24), frequency=12)
-time_test <- tail(time(Avg_ExtentTS), 24)
+Avg_ExtentTS_Train <- window(Avg_ExtentTS, 1988, 2020+11/12)
+Avg_ExtentTS_Test <- window(Avg_ExtentTS, 2021, 2022+9/12)
 ```
+
+## Regression
 
 Try to remove non-stationarity using Regression (Multiple Linear, Ridge, Lasso, Elastic Net).
 
 ### Multiple Linear Regression
 
 ```{r}
-tim <- time_train
+tim <- as.vector(time(Avg_ExtentTS_Train))
 season <- factor(cycle(Avg_ExtentTS_Train))
 
 # degree 1 polynomial of time
 mlr_train <- lm(Avg_ExtentTS_Train~tim+season)
 
-new <- data.frame(tim=time_test, season=factor(cycle(Avg_ExtentTS_Test)))
+new <- data.frame(tim=as.vector(time(Avg_ExtentTS_Test)), season=factor(cycle(Avg_ExtentTS_Test)))
 mse(Avg_ExtentTS_Test, predict.lm(mlr_train, new))
 
 # degree 2 polynomial of time
@@ -241,12 +239,12 @@ mse(Avg_ExtentTS_Test, predict.lm(mlr_train_3, new))
 #TODO residual diagnostics if proceed with this model
 ```
 
-The cubic model strictly performs best on the hold out set. However, the linear model may be better for its simplicity given that it has a similar MSE.
+The cubic model performs best on the hold out set.
 
 ```{r}
 tim <- as.vector(time(Avg_ExtentTS))
 season <- factor(cycle(Avg_ExtentTS))
-mlr <- lm(Avg_ExtentTS~tim+season)
+mlr <- lm(Avg_ExtentTS~poly(tim, 3)+season)
 
 plot(Avg_ExtentTS)
 points(time(Avg_ExtentTS), predict.lm(mlr), type='l', col='red')
@@ -259,7 +257,7 @@ acf(mlr$residuals)
 ```{r}
 library(glmnet)
 
-tim <- time_train
+tim <- as.vector(time(Avg_ExtentTS_Train))
 season <- factor(cycle(Avg_ExtentTS_Train))
 X <- model.matrix(as.vector(Avg_ExtentTS_Train)~tim+season)
 X_2 <- model.matrix(as.vector(Avg_ExtentTS_Train)~poly(tim,2)+season)
@@ -268,14 +266,14 @@ ridge_train <- glmnet(X, as.vector(Avg_ExtentTS_Train), alpha=0)
 ridge_train_2 <- glmnet(X_2, as.vector(Avg_ExtentTS_Train), alpha=0)
 ridge_train_3 <- glmnet(X_3, as.vector(Avg_ExtentTS_Train), alpha=0)
 
-tim <- time_test
+tim <- as.vector(time(Avg_ExtentTS_Test))
 season <- factor(cycle(Avg_ExtentTS_Test))
 X <- model.matrix(as.vector(Avg_ExtentTS_Test)~tim+season)
 X_2 <- model.matrix(as.vector(Avg_ExtentTS_Test)~poly(tim,2)+season)
 X_3 <- model.matrix(as.vector(Avg_ExtentTS_Test)~poly(tim,3)+season)
 ridge_predictions <- predict(ridge_train, X)
 ridge_predictions_2 <- predict(ridge_train_2, X_2)
-ridge_predictions_3 <- predict(ridge_train_2, X_2)
+ridge_predictions_3 <- predict(ridge_train_3, X_3)
 
 mses <- c()
 mses_2 <- c()
@@ -292,6 +290,8 @@ ridge_train_2$lambda[which.min(mses_2)]
 mses_2[which.min(mses_2)]
 ridge_train_3$lambda[which.min(mses_3)]
 mses_3[which.min(mses_3)]
+
+#TODO, choose range of lambda based on fit first, and then optimize mse
 ```
 
 We see that the degree 1 polynomial gives the lowest MSE.
@@ -301,7 +301,7 @@ We see that the degree 1 polynomial gives the lowest MSE.
 tim <- as.vector(time(Avg_ExtentTS))
 season <- factor(cycle(Avg_ExtentTS))
 X <- model.matrix(as.vector(Avg_ExtentTS)~tim+season)
-ridge <- glmnet(X, as.vector(Avg_ExtentTS), alpha=0, lambda=2.9671762)
+ridge <- glmnet(X, as.vector(Avg_ExtentTS), alpha=0, lambda=0.1653056)
 ridge_fitted <- predict(ridge, X, type="response")
 ridge_residuals <- Avg_ExtentTS - ridge_fitted
 plot(ridge_residuals, type="l")
@@ -309,12 +309,13 @@ plot(Avg_ExtentTS)
 points(time(Avg_ExtentTS), ridge_fitted, type='l', col='red')
 acf(ridge_residuals)
 ```
+
 ```{r}
 #degree 2 polynomial
 tim <- as.vector(time(Avg_ExtentTS))
 season <- factor(cycle(Avg_ExtentTS))
 X <- model.matrix(as.vector(Avg_ExtentTS)~poly(tim,2)+season)
-ridge_2 <- glmnet(X, as.vector(Avg_ExtentTS), alpha=0, lambda=5.690778)
+ridge_2 <- glmnet(X, as.vector(Avg_ExtentTS), alpha=0, lambda=2.037965)
 ridge_2_fitted <- predict(ridge_2, X, type="response")
 ridge_2_residuals <- Avg_ExtentTS - ridge_2_fitted
 plot(ridge_2_residuals, type="l")
@@ -322,12 +323,13 @@ plot(Avg_ExtentTS)
 points(time(Avg_ExtentTS), ridge_2_fitted, type='l', col='red')
 acf(ridge_2_residuals)
 ```
+
 ### Lasso
 
 ```{r}
 library(glmnet)
 
-tim <- time_train
+tim <- as.vector(time(Avg_ExtentTS_Train))
 season <- factor(cycle(Avg_ExtentTS_Train))
 X <- model.matrix(as.vector(Avg_ExtentTS_Train)~tim+season)
 X_2 <- model.matrix(as.vector(Avg_ExtentTS_Train)~poly(tim,2)+season)
@@ -336,20 +338,22 @@ lasso_train <- glmnet(X, as.vector(Avg_ExtentTS_Train), alpha=1)
 lasso_train_2 <- glmnet(X_2, as.vector(Avg_ExtentTS_Train), alpha=1)
 lasso_train_3 <- glmnet(X_3, as.vector(Avg_ExtentTS_Train), alpha=1)
 
-tim <- time_test
+tim <- as.vector(time(Avg_ExtentTS_Test))
 season <- factor(cycle(Avg_ExtentTS_Test))
 X <- model.matrix(as.vector(Avg_ExtentTS_Test)~tim+season)
 X_2 <- model.matrix(as.vector(Avg_ExtentTS_Test)~poly(tim,2)+season)
 X_3 <- model.matrix(as.vector(Avg_ExtentTS_Test)~poly(tim,3)+season)
 lasso_predictions <- predict(lasso_train, X)
 lasso_predictions_2 <- predict(lasso_train_2, X_2)
-lasso_predictions_3 <- predict(lasso_train_2, X_2)
+lasso_predictions_3 <- predict(lasso_train_3, X_3)
 
 mses <- c()
 mses_2 <- c()
 mses_3 <- c()
 for(i in 1:67) {
   mses <- c(mses, mse(Avg_ExtentTS_Test, lasso_predictions[,i]))
+}
+for(i in 1:68) {
   mses_2 <- c(mses_2, mse(Avg_ExtentTS_Test, lasso_predictions_2[,i]))
   mses_3 <- c(mses_3, mse(Avg_ExtentTS_Test, lasso_predictions_3[,i]))
 }
@@ -369,7 +373,7 @@ We see that the degree 1 polynomial gives the lowest MSE.
 tim <- as.vector(time(Avg_ExtentTS))
 season <- factor(cycle(Avg_ExtentTS))
 X <- model.matrix(as.vector(Avg_ExtentTS)~tim+season)
-lasso <- glmnet(X, as.vector(Avg_ExtentTS), alpha=1, lambda=0.3411532)
+lasso <- glmnet(X, as.vector(Avg_ExtentTS), alpha=1, lambda=0.005670758)
 lasso_fitted <- predict(lasso, X, type="response")
 lasso_residuals <- Avg_ExtentTS - lasso_fitted
 plot(lasso_residuals, type="l")
@@ -383,7 +387,7 @@ acf(lasso_residuals)
 tim <- as.vector(time(Avg_ExtentTS))
 season <- factor(cycle(Avg_ExtentTS))
 X <- model.matrix(as.vector(Avg_ExtentTS)~poly(tim,2)+season)
-lasso <- glmnet(X, as.vector(Avg_ExtentTS), alpha=1, lambda=0.3411532)
+lasso <- glmnet(X, as.vector(Avg_ExtentTS), alpha=1, lambda=0.373098)
 lasso_fitted <- predict(lasso, X, type="response")
 lasso_residuals <- Avg_ExtentTS - lasso_fitted
 plot(lasso_residuals, type="l")
@@ -406,7 +410,7 @@ Try to remove non-stationarity using exponential smoothing, double exponential s
 
 ```{r}
 es <- HoltWinters(Avg_ExtentTS_Train, gamma = FALSE , beta = FALSE)
-predict_es = predict(es, n.ahead=24)
+predict_es = predict(es, n.ahead=22)
 mse(Avg_ExtentTS_Test, predict_es)
 ```
 
@@ -414,7 +418,7 @@ mse(Avg_ExtentTS_Test, predict_es)
 
 ```{r}
 des <- HoltWinters(Avg_ExtentTS_Train, gamma = FALSE)
-predict_des = predict(des, n.ahead=24)
+predict_des = predict(des, n.ahead=22)
 mse(Avg_ExtentTS_Test, predict_des)
 ```
 
@@ -422,7 +426,7 @@ mse(Avg_ExtentTS_Test, predict_des)
 
 ```{r}
 additive <- HoltWinters(Avg_ExtentTS_Train, seasonal = "additive")
-predict_additive = predict(additive, n.ahead=24)
+predict_additive = predict(additive, n.ahead=22)
 mse(Avg_ExtentTS_Test, predict_additive)
 ```
 
@@ -430,11 +434,11 @@ mse(Avg_ExtentTS_Test, predict_additive)
 
 ```{r}
 multiplicative <- HoltWinters(Avg_ExtentTS_Train, seasonal = "multiplicative")
-predict_multiplicative = predict(multiplicative, n.ahead=24)
+predict_multiplicative = predict(multiplicative, n.ahead=22)
 mse(Avg_ExtentTS_Test, predict_additive)
 ```
 
-Best of HW models seems to be additive model. We fit this model to the entire data.
+Best of HW models seems to be additive/multiplicatice model. We fit this model to the entire data.
 
 ```{r}
 hw_additive <- HoltWinters(Avg_ExtentTS, seasonal = "additive")
@@ -443,9 +447,10 @@ plot(residuals_HW, type="l")
 acf(residuals_HW, lag.max=36)
 plot(Avg_ExtentTS)
 points(time(Avg_ExtentTS)[which(time(Avg_ExtentTS)>=1989)], hw_additive$fitted[,1], type='l', col='red')
+#plot(hw_additive)
 ```
 
-## Differencing
+## Differencing on Entire Data
 
 Try differencing to remove non-stationarity.
 
@@ -458,6 +463,7 @@ plot(Avg_ExtentTS)
 #differencing in lag of season
 diff12.Extent=diff(Avg_ExtentTS, lag=12)
 acf(diff12.Extent, lag.max=36)
+pacf(diff12.Extent, lag.max=36)
 plot(diff12.Extent)
 ```
 
@@ -478,16 +484,56 @@ plot(diff12.diff.Extent)
 It seems that regression performs poorly in terms of removing non-stationarity compared to HW and Differencing. HW and differencing seem to perform similarly. For simplicity, we proceed with differencing.
 
 ```{r}
-acf(diff12.diff.Extent, lag.max=72)
-pacf(diff12.diff.Extent, lag.max=72)
+acf(diff12.diff.Extent, lag.max=36)
+pacf(diff12.diff.Extent, lag.max=36)
 ```
+## Differencing on Train Data
+
+Try differencing to remove non-stationarity.
+
+```{r}
+acf(Avg_ExtentTS_Train, lag.max=36)
+plot(Avg_ExtentTS_Train)
+```
+
+```{r}
+#differencing in lag of season
+diff12.Extent=diff(Avg_ExtentTS_Train, lag=12)
+acf(diff12.Extent, lag.max=36)
+pacf(diff12.Extent, lag.max=36)
+plot(diff12.Extent)
+```
+
+```{r}
+#regular differencing
+diff.Extent=diff(Avg_ExtentTS_Train)
+acf(diff.Extent, lag.max=36)
+plot(diff.Extent)
+```
+
+```{r}
+# seasonal+regular differencing
+diff12.diff.Extent=diff(diff12.Extent)
+acf(diff12.diff.Extent, lag.max=36)
+plot(diff12.diff.Extent)
+```
+
+It seems that regression performs poorly in terms of removing non-stationarity compared to HW and Differencing. HW and differencing seem to perform similarly. For simplicity, we proceed with differencing.
+
+```{r}
+acf(diff12.diff.Extent, lag.max=36)
+pacf(diff12.diff.Extent, lag.max=36)
+```
+We propose the following models:
+#TODO
+
 
 ## Smoothing, followed by differencing
 
 Try smoothing before differencing to see effect on acf
 
 ```{r}
-smoothing <- HoltWinters(Avg_ExtentTS, season="additive")
+smoothing <- HoltWinters(Avg_ExtentTS_Train, season="additive")
 smoothed <- smoothing$fitted[,1]
 diff12.Extent_smooth=diff(smoothed, lag=12)
 acf(diff12.Extent_smooth, lag.max=36)
@@ -502,7 +548,125 @@ pacf(diff12.diff.Extent_smooth, lag.max=36)
 ```
 
 
+# Model Fitting
 
+```{r}
+library(astsa)
 
+#SARIMA(0,1,2)x(0,1,1)_12
+model_1_train <- sarima(Avg_ExtentTS_Train, p=0, d=1, q=2, P=0, D=1, Q=1, S=12 , details = TRUE)
+model_1_train_residuals = resid(model_1_train$fit)
+hist(model_1_train_residuals)
+shapiro.test(model_1_train_residuals)
+c(model_1_train$AIC, model_1_train$AICc, model_1_train$BIC)
+```
 
+```{r}
+#SARIMA(0,1,2)x(3,1,0)_12
+model_2_train <- sarima(Avg_ExtentTS_Train, p=0, d=1, q=2, P=3, D=1, Q=0, S=12 , details = TRUE)
+model_2_train_residuals = resid(model_2_train$fit)
+hist(model_2_train_residuals)
+shapiro.test(model_2_train_residuals)
+c(model_2_train$AIC, model_2_train$AICc, model_2_train$BIC)
+```
 
+```{r}
+#SARIMA(0,1,2)x(1,1,1)_12
+model_3_train <- sarima(Avg_ExtentTS_Train, p=0, d=1, q=2, P=1, D=1, Q=1, S=12 , details = TRUE)
+model_3_train_residuals = resid(model_3_train$fit)
+hist(model_3_train_residuals)
+shapiro.test(model_3_train_residuals)
+c(model_3_train$AIC, model_3_train$AICc, model_3_train$BIC)
+```
+```{r}
+#SARIMA(4,1,0)x(0,1,1)_12
+model_4_train <- sarima(Avg_ExtentTS_Train, p=4, d=1, q=0, P=0, D=1, Q=1, S=12 , details = TRUE)
+model_4_train_residuals = resid(model_4_train$fit)
+hist(model_4_train_residuals)
+shapiro.test(model_4_train_residuals)
+c(model_4_train$AIC, model_4_train$AICc, model_4_train$BIC)
+```
+
+```{r}
+#SARIMA(4,1,0)x(3,1,0)_12
+model_5_train <- sarima(Avg_ExtentTS_Train, p=4, d=1, q=0, P=3, D=1, Q=0, S=12 , details = TRUE)
+model_5_train_residuals = resid(model_5_train$fit)
+hist(model_5_train_residuals)
+shapiro.test(model_5_train_residuals)
+c(model_5_train$AIC, model_5_train$AICc, model_5_train$BIC)
+```
+
+```{r}
+#SARIMA(4,1,0)x(1,1,1)_12
+model_6_train <- sarima(Avg_ExtentTS_Train, p=4, d=1, q=0, P=1, D=1, Q=1, S=12 , details = TRUE)
+model_6_train_residuals = resid(model_4_train$fit)
+hist(model_6_train_residuals)
+shapiro.test(model_6_train_residuals)
+c(model_6_train$AIC, model_6_train$AICc, model_6_train$BIC)
+```
+
+```{r}
+#SARIMA(1,1,1)x(0,1,1)_12
+model_7_train <- sarima(Avg_ExtentTS_Train, p=1, d=1, q=1, P=0, D=1, Q=1, S=12 , details = TRUE)
+model_7_train_residuals = resid(model_7_train$fit)
+hist(model_7_train_residuals)
+shapiro.test(model_7_train_residuals)
+c(model_7_train$AIC, model_7_train$AICc, model_7_train$BIC)
+```
+
+```{r}
+#SARIMA(1,1,1)x(3,1,0)_12
+model_8_train <- sarima(Avg_ExtentTS_Train, p=1, d=1, q=1, P=3, D=1, Q=0, S=12 , details = TRUE)
+model_8_train_residuals = resid(model_8_train$fit)
+hist(model_8_train_residuals)
+shapiro.test(model_8_train_residuals)
+c(model_8_train$AIC, model_8_train$AICc, model_8_train$BIC)
+```
+
+```{r}
+#SARIMA(1,1,1)x(1,1,1)_12
+model_9_train <- sarima(Avg_ExtentTS_Train, p=1, d=1, q=1, P=1, D=1, Q=1, S=12 , details = TRUE)
+model_9_train_residuals = resid(model_4_train$fit)
+hist(model_9_train_residuals)
+shapiro.test(model_9_train_residuals)
+c(model_9_train$AIC, model_9_train$AICc, model_9_train$BIC)
+```
+
+```{r}
+library(huxtable)
+goodness_of_fit <- hux(
+        Model = c('SARIMA(0,1,2)x(0,1,1)_12', 'SARIMA(0,1,2)x(3,1,0)_12', 'SARIMA(0,1,2)x(1,1,1)_12', 
+                  'SARIMA(4,1,0)x(0,1,1)_12', 'SARIMA(4,1,0)x(3,1,0)_12', 'SARIMA(4,1,0)x(1,1,1)_12', 
+                  'SARIMA(1,1,1)x(0,1,1)_12', 'SARIMA(1,1,1)x(3,1,0)_12', 'SARIMA(1,1,1)x(1,1,1)_12)'),
+        AIC = c(model_1_train$AIC, model_2_train$AIC, model_3_train$AIC, 
+                model_4_train$AIC, model_5_train$AIC, model_6_train$AIC, 
+                model_7_train$AIC, model_8_train$AIC, model_9_train$AIC),
+        AICc = c(model_1_train$AICc, model_2_train$AICc, model_3_train$AICc, 
+                model_4_train$AICc, model_5_train$AICc, model_6_train$AICc, 
+                model_7_train$AICc, model_8_train$AICc, model_9_train$AICc),
+        BIC = c(model_1_train$BIC, model_2_train$BIC, model_3_train$BIC,
+                model_4_train$BIC, model_5_train$BIC, model_6_train$BIC,
+                model_7_train$BIC, model_8_train$BIC, model_9_train$BIC),
+        MSE = c(mean(model_1_train_residuals^2), mean(model_2_train_residuals^2), mean(model_3_train_residuals^2),
+                mean(model_4_train_residuals^2), mean(model_5_train_residuals^2), mean(model_6_train_residuals^2),
+                mean(model_7_train_residuals^2), mean(model_8_train_residuals^2), mean(model_9_train_residuals^2))
+      )
+
+goodness_of_fit %>% 
+  set_number_format(col=c(2,3,4,5), value=3) %>%
+  set_bottom_border(1, everywhere) %>%
+  set_bold(9, everywhere) %>%
+  set_background_color(9, everywhere, "grey95")
+```
+
+## Model Selection
+
+```{r}
+model_1_train_forecast<- sarima.for(Avg_ExtentTS_Train, n.ahead=22, p=0,d=1,q=2,P=0,D=1,Q=1,S=12)
+model_4_train_forecast<- sarima.for(Avg_ExtentTS_Train, n.ahead=22, p=4,d=1,q=0,P=0,D=1,Q=1,S=12)
+model_8_train_forecast<- sarima.for(Avg_ExtentTS_Train, n.ahead=22, p=1,d=1,q=1,P=3,D=1,Q=0,S=12)
+
+mean((model_1_train_forecast$pred-Avg_ExtentTS_Test)^2)
+mean((model_3_train_forecast$pred-Avg_ExtentTS_Test)^2)
+mean((model_8_train_forecast$pred-Avg_ExtentTS_Test)^2)
+```
