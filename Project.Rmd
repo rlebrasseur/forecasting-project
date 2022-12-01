@@ -1098,6 +1098,22 @@ model_33_train_residuals = resid(model_33_train$fit)
 hist(model_33_train_residuals)
 shapiro.test(model_33_train_residuals)
 ```
+```{r}
+# Weird combo of optimal parameters for d=0, and d=1
+#SARIMA(1,0,1)x(3,1,0)_12
+model_34_train <- sarima(Avg_ExtentTS_Train, p=1, d=0, q=1, P=3, D=1, Q=0, S=12 , details = TRUE)
+model_34_train_residuals = resid(model_34_train$fit)
+hist(model_34_train_residuals)
+shapiro.test(model_34_train_residuals)
+```
+```{r}
+# Weird combo of optimal parameters for d=0, and d=1
+#SARIMA(1,0,1)x(3,1,0)_12
+model_35_train <- sarima(Avg_ExtentTS_Train, p=1, d=0, q=1, P=4, D=1, Q=0, S=12 , details = TRUE)
+model_35_train_residuals = resid(model_34_train$fit)
+hist(model_35_train_residuals)
+shapiro.test(model_35_train_residuals)
+```
 
 #TODO try 'SARIMA(1,0,3)x(0,1,1)_12', 'SARIMA(3,0,1)x(0,1,1)_12', 'SARIMA(2,0,3)x(0,1,1)_12', 'SARIMA(3,0,2)x(0,1,1)_12', 'SARIMA(3,0,3)x(0,1,1)_12'
 
@@ -1106,24 +1122,48 @@ library(huxtable)
 goodness_of_fit <- hux(
         Model = c('SARIMA(1,0,1)x(0,1,1)_12', 'SARIMA(1,0,1)x(1,1,0)_12', 'SARIMA(1,0,1)x(0,1,3)_12', 'SARIMA(1,0,1)x(0,1,4)_12', 'SARIMA(1,0,1)x(1,1,1)_12',
                   'SARIMA(13,0,0)x(0,1,1)_12', 'SARIMA(13,0,0)x(1,1,0)_12', 'SARIMA(13,0,0)x(0,1,3)_12', 'SARIMA(13,0,0)x(0,1,4)_12', 'SARIMA(13,0,0)x(1,1,1)_12',
-                  'SARIMA(1,0,2)x(0,1,1)_12', 'SARIMA(2,0,1)x(0,1,1)_12', 'SARIMA(2,0,2)x(0,1,1)_12'),
+                  'SARIMA(1,0,2)x(0,1,1)_12', 'SARIMA(2,0,1)x(0,1,1)_12', 'SARIMA(2,0,2)x(0,1,1)_12', 'SARIMA(1,0,1)x(3,1,0)_12', 'SARIMA(1,0,1)x(4,1,0)_12'),
         AIC = c(model_21_train$AIC, model_22_train$AIC, model_23_train$AIC, model_24_train$AIC, model_25_train$AIC,
                 model_26_train$AIC, model_27_train$AIC, model_28_train$AIC, model_29_train$AIC, model_30_train$AIC,
-                model_31_train$AIC, model_32_train$AIC, model_33_train$AIC),
+                model_31_train$AIC, model_32_train$AIC, model_33_train$AIC, model_34_train$AIC, model_35_train$AIC),
         AICc = c(model_21_train$AICc, model_22_train$AICc, model_23_train$AICc, model_24_train$AICc, model_25_train$AICc, 
                 model_26_train$AICc, model_27_train$AICc, model_28_train$AICc, model_29_train$AICc, model_30_train$AICc,
-                model_31_train$AICc, model_32_train$AICc, model_33_train$AICc),
+                model_31_train$AICc, model_32_train$AICc, model_33_train$AICc, model_34_train$AICc, model_35_train$AICc),
         BIC = c(model_21_train$BIC, model_22_train$BIC, model_23_train$BIC, model_24_train$BIC, model_25_train$BIC,
                 model_26_train$BIC, model_27_train$BIC, model_28_train$BIC, model_29_train$BIC, model_30_train$BIC,
-                model_31_train$BIC, model_32_train$BIC, model_33_train$BIC),
+                model_31_train$BIC, model_32_train$BIC, model_33_train$BIC, model_34_train$BIC, model_35_train$BIC),
         MSE = c(mean(model_21_train_residuals^2), mean(model_22_train_residuals^2), mean(model_23_train_residuals^2), mean(model_24_train_residuals^2), mean(model_25_train_residuals^2),
                 mean(model_26_train_residuals^2), mean(model_27_train_residuals^2), mean(model_28_train_residuals^2), mean(model_29_train_residuals^2), mean(model_30_train_residuals^2),
-                mean(model_31_train_residuals^2), mean(model_32_train_residuals^2), mean(model_33_train_residuals^2))
+                mean(model_31_train_residuals^2), mean(model_32_train_residuals^2), mean(model_33_train_residuals^2), mean(model_34_train_residuals^2), mean(model_35_train_residuals^2))
       )
 
 goodness_of_fit %>% 
   set_number_format(col=c(2,3,4,5), value=3) %>%
-  set_bottom_border(c(1), everywhere) %>%
+  set_bottom_border(c(1,11,14), everywhere) %>%
   set_bold(c(2,4,5,6,12,13), everywhere) %>%
   set_background_color(c(2,4,5,6,12,13), everywhere, "grey95")
+```
+
+\newpage
+
+ .
+
+\newpage
+
+## Model Selection
+
+```{r}
+model_21_train_forecast<- sarima.for(Avg_ExtentTS_Train, n.ahead=22, p=1,d=0,q=1,P=0,D=1,Q=1,S=12)
+lines(Avg_ExtentTS_Test,col='blue',type='b',pch=16)
+model_23_train_forecast<- sarima.for(Avg_ExtentTS_Train, n.ahead=22, p=1,d=0,q=1,P=0,D=1,Q=3,S=12)
+lines(Avg_ExtentTS_Test,col='blue',type='b',pch=16)
+model_24_train_forecast<- sarima.for(Avg_ExtentTS_Train, n.ahead=22, p=1,d=0,q=1,P=0,D=1,Q=4,S=12)
+lines(Avg_ExtentTS_Test,col='blue',type='b',pch=16)
+model_25_train_forecast<- sarima.for(Avg_ExtentTS_Train, n.ahead=22, p=1,d=0,q=1,P=1,D=1,Q=1,S=12)
+lines(Avg_ExtentTS_Test,col='blue',type='b',pch=16)
+
+mean((model_21_train_forecast$pred-Avg_ExtentTS_Test)^2)
+mean((model_23_train_forecast$pred-Avg_ExtentTS_Test)^2)
+mean((model_24_train_forecast$pred-Avg_ExtentTS_Test)^2)
+mean((model_25_train_forecast$pred-Avg_ExtentTS_Test)^2)
 ```
